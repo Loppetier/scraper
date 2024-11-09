@@ -37,37 +37,41 @@ CREATE TABLE IF NOT EXISTS backlinks (
 
 conn.commit()
 
-# Tor-IP erneuern
+# Funktion zur Erneuerung der Tor-IP
 def renew_tor_ip():
     with Controller.from_port(port=9051) as controller:
         controller.authenticate(password='your_tor_password')  # Passwort anpassen
         controller.signal(Signal.NEWNYM)
         time.sleep(10)  # Wartezeit nach IP-Wechsel
 
-# Backlinks extrahieren und speichern
+# Funktion zum Scraping und Speichern von Backlinks
 def scrape_backlinks(source_url):
     try:
         response = requests.get(source_url, proxies=tor_proxy, timeout=15)
         soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Alle Links auf der Seite extrahieren
+
+        # Alle Links extrahieren und validieren
         for link in soup.find_all('a', href=True):
-            target_url = link['href']
-            anchor_text = link.get_text(strip=True)
-            
-            # URLs in die Tabelle "pages" einfügen
-            cursor.execute("INSERT OR IGNORE INTO pages (url) VALUES (?)", (source_url,))
-            cursor.execute("INSERT OR IGNORE INTO pages (url) VALUES (?)", (target_url,))
-            
-            source_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (source_url,)).fetchone()[0]
-            target_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (target_url,)).fetchone()[0]
-            
-            # Backlink in die Tabelle "backlinks" einfügen
-            cursor.execute('''
-                INSERT INTO backlinks (source_id, target_id, anchor_text, timestamp)
-                VALUES (?, ?, ?, datetime('now'))
-            ''', (source_id, target_id, anchor_text))
-            
+            target_url = link['href'].strip()  # Entferne unnötige Leerzeichen
+            anchor_text = link.get_text(strip=True)  # Extrahiere den Ankertext
+
+            # Validierung: Nur weiterarbeiten, wenn der Link kein XPath oder CSS-Selector ist
+            if not (target_url.startswith('/') or target_url.startswith('.')):
+                print(f"Valid URL: {target_url}, Anchor: {anchor_text}")
+
+                # URLs in die Tabelle "pages" einfügen
+                cursor.execute("INSERT OR IGNORE INTO pages (url) VALUES (?)", (source_url,))
+                cursor.execute("INSERT OR IGNORE INTO pages (url) VALUES (?)", (target_url,))
+
+                source_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (source_url,)).fetchone()[0]
+                target_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (target_url,)).fetchone()[0]
+
+                # Backlink in die Tabelle "backlinks" einfügen
+                cursor.execute('''
+                    INSERT INTO backlinks (source_id, target_id, anchor_text, timestamp)
+                    VALUES (?, ?, ?, datetime('now'))
+                ''', (source_id, target_id, anchor_text))
+
         conn.commit()
     except Exception as e:
         print(f"Fehler beim Abrufen von {source_url}: {e}")
