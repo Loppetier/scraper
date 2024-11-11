@@ -37,25 +37,33 @@ CREATE TABLE IF NOT EXISTS backlinks (
 
 conn.commit()
 
-# Funktion zur Erneuerung der Tor-IP
+# Tor-IP erneuern
 def renew_tor_ip():
     with Controller.from_port(port=9051) as controller:
         controller.authenticate(password='your_tor_password')  # Passwort anpassen
         controller.signal(Signal.NEWNYM)
         time.sleep(10)  # Wartezeit nach IP-Wechsel
 
-# Funktion zum Scraping und Speichern von Backlinks
+# Backlinks extrahieren und Navigationslinks filtern
 def scrape_backlinks(source_url):
+    # Liste der Navigationsankertexte
+    navigation_keywords = ['Home', 'Über uns', 'Kontakt', 'Impressum', 'Datenschutz']
+    # Liste typischer Navigationspfade
+    navigation_paths = ['/home', '/about', '/contact', '/privacy', '/terms']
+
     try:
         response = requests.get(source_url, proxies=tor_proxy, timeout=15)
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        # Alle Links extrahieren und validieren
         for link in soup.find_all('a', href=True):
-            target_url = link['href'].strip()  # Entferne unnötige Leerzeichen
-            anchor_text = link.get_text(strip=True)  # Extrahiere den Ankertext
+            target_url = link['href'].strip()
+            anchor_text = link.get_text(strip=True)
 
-            # Validierung: Nur weiterarbeiten, wenn der Link kein XPath oder CSS-Selector ist
+            # Filterung von Navigationslinks basierend auf Ankertext und URL-Pfaden
+            if anchor_text in navigation_keywords or any(nav_path in target_url for nav_path in navigation_paths):
+                continue  # Ignoriere Navigationslinks
+
+            # Nur valide und relevante Links weiterverarbeiten
             if not (target_url.startswith('/') or target_url.startswith('.')):
                 print(f"Valid URL: {target_url}, Anchor: {anchor_text}")
 
