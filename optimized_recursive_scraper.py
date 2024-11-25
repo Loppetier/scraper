@@ -50,16 +50,20 @@ CREATE TABLE IF NOT EXISTS logs (
 conn.commit()
 
 # Fortschrittsanzeige initialisieren
-def show_progress(current, total, start_time):
+processed_urls = set()  # Speichert bearbeitete URLs
+start_time = time.time()
+
+def show_progress():
+    current = len(processed_urls)
+    total = current + len(urls_to_process)  # Verbleibende + bereits bearbeitete
     elapsed_time = time.time() - start_time
     avg_time_per_url = elapsed_time / current if current > 0 else 0
     remaining_time = avg_time_per_url * (total - current)
 
-    # Formatierte Zeit
     elapsed_str = str(datetime.timedelta(seconds=int(elapsed_time)))
     remaining_str = str(datetime.timedelta(seconds=int(remaining_time)))
 
-    progress = (current / total) * 100
+    progress = (current / total) * 100 if total > 0 else 0
     print(f"Fortschritt: {current}/{total} URLs ({progress:.2f}%)")
     print(f"Vergangene Zeit: {elapsed_str}, Verbleibende Zeit: {remaining_str}")
 
@@ -87,7 +91,11 @@ def is_valid_onion_url(url):
     return url.endswith('.onion')
 
 # Backlinks extrahieren und speichern
-def scrape_backlinks(source_url, total_urls, current_index, start_time):
+def scrape_backlinks(source_url):
+    if source_url in processed_urls:
+        return  # Verhindert erneutes Verarbeiten
+    processed_urls.add(source_url)
+
     try:
         response = requests.get(source_url, proxies=tor_proxy, timeout=15)
         response.raise_for_status()
@@ -127,9 +135,7 @@ def scrape_backlinks(source_url, total_urls, current_index, start_time):
             log_event("INFO", f"Backlink gespeichert: {source_url} -> {target_url}", source_url)
 
         conn.commit()
-
-        # Fortschrittsanzeige aktualisieren
-        show_progress(current_index + 1, total_urls, start_time)
+        show_progress()
 
     except requests.exceptions.RequestException as e:
         log_event("ERROR", f"HTTP-Fehler bei {source_url}: {e}", source_url)
@@ -157,13 +163,13 @@ def find_referring_pages(target_url):
                     referring_url = urljoin(engine, referring_url)
 
                 if is_valid_onion_url(referring_url):
-                    scrape_backlinks(referring_url, 1, 0, time.time())
+                    urls_to_process.append(referring_url)
         except Exception as e:
             log_event("ERROR", f"Fehler bei der Rückwärtssuche für {target_url}: {e}")
 
 # Liste von `.onion`-Startseiten
-urls = [
-    'http://2356uhnbpv5nk3bni5bv6jg2cd6lgj664kwx3lhyelstpttpyv4kk2qd.onion',
+urls_to_process = urls = [
+'http://2356uhnbpv5nk3bni5bv6jg2cd6lgj664kwx3lhyelstpttpyv4kk2qd.onion',
 'http://2bcbla34hrkp6shb4myzb2wntl2fxdbrroc2t4t7c3shckvhvk4fw6qd.onion',
 'http://2ezyofc26j73hv3xxvsrnbc23dqxhgxqtk5ogcc7y6j5t6rlqquvhzid.onion',
 'http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion',
@@ -219,12 +225,12 @@ urls = [
 'http://explorerzydxu5ecjrkwceayqybizmpjjznk5izmitf2modhcusuqlid.onion',
 'http://ez37hmhem2gh3ixctfeaqn7kylal2vyjqsedkzhu4ebkcgikrigr5gid.onion',
 'http://f6wqhy6ii7metm45m4mg6yg76yytik5kxe6h7sestyvm6gnlcw3n4qad.onion',
-'http://forums.dds6qkxpwdeubwucdiaord2xgbbeyds25rbsgr73tbfpqpt4a6vjwsyd.onion',
+'http://dds6qkxpwdeubwucdiaord2xgbbeyds25rbsgr73tbfpqpt4a6vjwsyd.onion',
 'http://fwfwqtpi2ofmehzdxe3e2htqfmhwfciwivpnsztv7dvpuamhr72ktlqd.onion',
 'http://g7ejphhubv5idbbu3hb3wawrs5adw7tkx7yjabnf65xtzztgg4hcsqqd.onion',
 'http://gch3dyxo5zuqbrrtd64zlvzwxden4jkikyqk3ikjhggqzoxixcmq2fid.onion',
 'http://gd5x24pjoan2pddc2fs6jlmnqbawq562d2qyk6ym4peu5ihzy6gd4jad.onion',
-'http://git.fwfwqtpi2ofmehzdxe3e2htqfmhwfciwivpnsztv7dvpuamhr72ktlqd.onion',
+'http://fwfwqtpi2ofmehzdxe3e2htqfmhwfciwivpnsztv7dvpuamhr72ktlqd.onion',
 'http://gkcns4d3453llqjrksxdijfmmdjpqsykt6misgojxlhsnpivtl3uwhqd.onion',
 'http://gn74rz534aeyfxqf33hqg6iuspizulmvpd7zoyz7ybjq4jo3whkykryd.onion',
 'http://guzjgkpodzshso2nohspxijzk5jgoaxzqioa7vzy6qdmwpz3hq4mwfid.onion',
@@ -233,7 +239,7 @@ urls = [
 'http://hyjgsnkanan2wsrksd53na4xigtxhlz57estwqtptzhpa53rxz53pqad.onion',
 'http://hyxme2arc5jnevzlou547w2aaxubjm7mxhbhtk73boiwjxewawmrz6qd.onion',
 'http://hzwjmjimhr7bdmfv2doll4upibt5ojjmpo3pbp5ctwcg37n3hyk7qzid.onion',
-'http://irc.fwfwqtpi2ofmehzdxe3e2htqfmhwfciwivpnsztv7dvpuamhr72ktlqd.onion',
+'http://fwfwqtpi2ofmehzdxe3e2htqfmhwfciwivpnsztv7dvpuamhr72ktlqd.onion',
 'http://iwggpyxn6qv3b2twpwtyhi2sfvgnby2albbcotcysd5f7obrlwbdbkyd.onion',
 'http://jaz45aabn5vkemy4jkg4mi4syheisqn2wn2n4fsuitpccdackjwxplad.onion',
 'http://jbtb75gqlr57qurikzy2bxxjftzkmanynesmoxbzzcp7qf5t46u7ekqd.onion',
@@ -319,8 +325,8 @@ urls = [
 'http://wms5y25kttgihs4rt2sifsbwsjqjrx3vtc42tsu2obksqkj7y666fgid.onion',
 'http://wnrgozz3bmm33em4aln3lrbewf3ikxj7fwglqgla2tpdji4znjp7viqd.onion',
 'http://wosc4noitfscyywccasl3c4yu3lftpl2adxuvprp6sbg4fud6mkrwqqd.onion',
-'http://www.kj2aybibqqcwt5nrskmv2qzdbq2gfgimpyshcnerbxkhkbyqz64kgcyd.onion',
-'http://www.qubesosfasa4zl44o4tws22di6kepyzfeqv3tg4e3ztknltfxqrymdad.onion',
+'http://kj2aybibqqcwt5nrskmv2qzdbq2gfgimpyshcnerbxkhkbyqz64kgcyd.onion',
+'http://qubesosfasa4zl44o4tws22di6kepyzfeqv3tg4e3ztknltfxqrymdad.onion',
 'http://xdkriz6cn2avvcr2vks5lvvtmfojz2ohjzj4fhyuka55mvljeso2ztqd.onion',
 'http://xf2gry25d3tyxkiu2xlvczd3q7jl6yyhtpodevjugnxia2u665asozad.onion',
 'http://xjfbpuj56rdazx4iolylxplbvyft2onuerjeimlcqwaihp3s6r4xebqd.onion',
@@ -340,17 +346,17 @@ urls = [
 'https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion',
 'https://kcmykvkkt3umiyx4xouu3sjo6odz3rolqphy2i2bbdan33g3zrjfjgqd.onion',
 'https://protonmailrmez3lotccipshtkleegetolb73fuirgj7r4o4vfu7ozyd.onion',
-'https://www.facebookwkhpilnemxj7asaniu7vnjjbiltxjqhye3mhbshg7kx5tfyd.onion'
+'https://facebookwkhpilnemxj7asaniu7vnjjbiltxjqhye3mhbshg7kx5tfyd.onion'
 
 ]
 
 
 # Scraping-Prozess starten
-start_time = time.time()  # Startzeit festlegen
-for idx, url in enumerate(urls):
-    scrape_backlinks(url, len(urls), idx, start_time)
+while urls_to_process:
+    current_url = urls_to_process.pop(0)
+    scrape_backlinks(current_url)
     renew_tor_ip()
-    find_referring_pages(url)
+    find_referring_pages(current_url)
 
 # Verbindung schließen
 conn.close()
