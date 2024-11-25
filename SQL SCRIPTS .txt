@@ -1,0 +1,47 @@
+SQL SCRIPTS
+///## show 20 url_IDs with highest backlink count
+
+SELECT p.url, COUNT(b.target_id) AS backlink_count
+From backlinks b
+JOIN pages p ON b.target_id= p.id
+GROUP BY p.url
+ORDER BY backlink_count DESC
+LIMIT 20;
+
+///## show 20 target ULS with highest backlink count
+
+
+
+
+///## all Backlinks
+
+SELECT COUNT(*) AS total_backlinks
+FROM backlinks;
+
+
+///## show most backlinks by source_url
+
+SELECT p.url AS source_url, COUNT(b.source_id) AS backlink_count
+FROM backlinks b
+JOIN pages p ON b.source_id = p.id
+GROUP BY p.url
+ORDER BY backlink_count DESC;
+
+///## Show 20 pairs of source and target url
+
+SELECT p1.url AS source_url, p2.url AS target_url
+FROM backlinks b
+JOIN pages p1 ON b.source_id=p1.id
+JOIN pages p2 ON b.target_id=p2.id
+LIMIT 20;
+
+///## show unique target_urls
+
+SELECT COUNT(DISTINCT target_id) AS unique_target_urls FROM backlinks;
+
+///## show unique source_urls
+
+SELECT COUNT(DISTINCT source_id) AS unique_source_urls FROM backlinks;
+
+
+
