@@ -5,6 +5,7 @@ from stem.control import Controller
 import sqlite3
 import time
 from urllib.parse import urlparse, urljoin
+import datetime
 
 # Tor-Proxyeinstellungen
 tor_proxy = {
@@ -48,6 +49,20 @@ CREATE TABLE IF NOT EXISTS logs (
 
 conn.commit()
 
+# Fortschrittsanzeige initialisieren
+def show_progress(current, total, start_time):
+    elapsed_time = time.time() - start_time
+    avg_time_per_url = elapsed_time / current if current > 0 else 0
+    remaining_time = avg_time_per_url * (total - current)
+
+    # Formatierte Zeit
+    elapsed_str = str(datetime.timedelta(seconds=int(elapsed_time)))
+    remaining_str = str(datetime.timedelta(seconds=int(remaining_time)))
+
+    progress = (current / total) * 100
+    print(f"Fortschritt: {current}/{total} URLs ({progress:.2f}%)")
+    print(f"Vergangene Zeit: {elapsed_str}, Verbleibende Zeit: {remaining_str}")
+
 # Tor-IP erneuern
 def renew_tor_ip():
     try:
@@ -72,7 +87,7 @@ def is_valid_onion_url(url):
     return url.endswith('.onion')
 
 # Backlinks extrahieren und speichern
-def scrape_backlinks(source_url):
+def scrape_backlinks(source_url, total_urls, current_index, start_time):
     try:
         response = requests.get(source_url, proxies=tor_proxy, timeout=15)
         response.raise_for_status()
@@ -112,6 +127,10 @@ def scrape_backlinks(source_url):
             log_event("INFO", f"Backlink gespeichert: {source_url} -> {target_url}", source_url)
 
         conn.commit()
+
+        # Fortschrittsanzeige aktualisieren
+        show_progress(current_index + 1, total_urls, start_time)
+
     except requests.exceptions.RequestException as e:
         log_event("ERROR", f"HTTP-Fehler bei {source_url}: {e}", source_url)
     except Exception as e:
@@ -120,9 +139,9 @@ def scrape_backlinks(source_url):
 # Rückwärts-Suche von Backlinks mit Onion-Suchmaschinen
 def find_referring_pages(target_url):
     search_engines = [
+        'http://6pxxjp7iwjbvtrfv3qqgz36zm6nnovi3xujepycve3n4jirg5vpmorad.onion',
         'http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion',
-        'http://darknetlidvrsli6iso7my54rjayjursyw637aypb6qambkoepmyq2yd.onion',
-        'http://6pxxjp7iwjbvtrfv3qqgz36zm6nnovi3xujepycve3n4jirg5vpmorad.onion'
+        'http://darknetlidvrsli6iso7my54rjayjursyw637aypb6qambkoepmyq2yd.onion'
     ]
 
     for engine in search_engines:
@@ -138,13 +157,13 @@ def find_referring_pages(target_url):
                     referring_url = urljoin(engine, referring_url)
 
                 if is_valid_onion_url(referring_url):
-                    scrape_backlinks(referring_url)
+                    scrape_backlinks(referring_url, 1, 0, time.time())
         except Exception as e:
             log_event("ERROR", f"Fehler bei der Rückwärtssuche für {target_url}: {e}")
 
 # Liste von `.onion`-Startseiten
 urls = [
-'http://2356uhnbpv5nk3bni5bv6jg2cd6lgj664kwx3lhyelstpttpyv4kk2qd.onion',
+    'http://2356uhnbpv5nk3bni5bv6jg2cd6lgj664kwx3lhyelstpttpyv4kk2qd.onion',
 'http://2bcbla34hrkp6shb4myzb2wntl2fxdbrroc2t4t7c3shckvhvk4fw6qd.onion',
 'http://2ezyofc26j73hv3xxvsrnbc23dqxhgxqtk5ogcc7y6j5t6rlqquvhzid.onion',
 'http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion',
@@ -322,12 +341,14 @@ urls = [
 'https://kcmykvkkt3umiyx4xouu3sjo6odz3rolqphy2i2bbdan33g3zrjfjgqd.onion',
 'https://protonmailrmez3lotccipshtkleegetolb73fuirgj7r4o4vfu7ozyd.onion',
 'https://www.facebookwkhpilnemxj7asaniu7vnjjbiltxjqhye3mhbshg7kx5tfyd.onion'
-	
+
 ]
 
+
 # Scraping-Prozess starten
-for url in urls:
-    scrape_backlinks(url)
+start_time = time.time()  # Startzeit festlegen
+for idx, url in enumerate(urls):
+    scrape_backlinks(url, len(urls), idx, start_time)
     renew_tor_ip()
     find_referring_pages(url)
 
