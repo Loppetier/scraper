@@ -90,18 +90,19 @@ def log_event(level, message, url=None):
 def is_valid_onion_url(url):
     return url.endswith('.onion') and len(urlparse(url).netloc) == 56
 
-# Redirect-Links auflösen
 def resolve_redirect(url):
+    """Löst Redirect-Links auf und gibt die endgültige Ziel-URL zurück."""
     try:
+        # HEAD-Anfrage verwenden, um Redirects zu überprüfen
         response = requests.head(url, proxies=tor_proxy, timeout=15, allow_redirects=True)
+        if response.url != url:
+            print(f"Redirect erkannt: {url} -> {response.url}")
+            log_event("INFO", f"Redirect erkannt: {url} -> {response.url}")
         return response.url
-    except Exception as e:
-        log_event("ERROR", f"Fehler beim Auflösen von Redirects: {e}", url)
-        return url
-
-# Redirect-Links filtern
-def is_redirect_url(url):
-    return "redirect_url" in url or "search/redirect" in url
+    except requests.exceptions.RequestException as e:
+        print(f"Fehler beim Auflösen von Redirects: {url}, Grund: {e}")
+        log_event("ERROR", f"Fehler beim Auflösen von Redirects: {url}, Grund: {e}")
+        return url  # Falls der Redirect nicht aufgelöst werden kann, die ursprüngliche URL zurückgeben
 
 def categorize_url_from_html(soup, default_category="Unknown"):
     """Ermittelt die Kategorie der Seite basierend auf Titel und Metadaten."""
@@ -122,57 +123,64 @@ def categorize_url_from_html(soup, default_category="Unknown"):
 
 # Scraping mit Redirect-Auflösung und Filterung
 def scrape_backlinks(source_url):
-    print(f"Starte Verarbeitung für URL: {source_url}")
-
+    """Scrape Backlinks von einer gegebenen URL, inklusive Redirect-Verarbeitung."""
     if source_url in processed_urls:
-        print(f"Bereits verarbeitet: {source_url}")
         return
     processed_urls.add(source_url)
 
     try:
+        # Redirect auflösen
         resolved_url = resolve_redirect(source_url)
-        print(f"Nach Redirect: {resolved_url}")
 
-        if is_redirect_url(resolved_url):
-            print(f"Als Redirect erkannt und ignoriert: {resolved_url}")
-            return
-
+        # HTTP-Anfrage an die endgültige URL senden
         response = requests.get(resolved_url, proxies=tor_proxy, timeout=15)
         response.raise_for_status()
-        print(f"Seite abgerufen: {resolved_url} (Status: {response.status_code})")
-
         soup = BeautifulSoup(response.content, 'html.parser')
-        category = categorize_url_from_html(soup)
-        print(f"Kategorie: {category}")
 
+        # Dynamische Kategorisierung der Seite
+        category = categorize_url_from_html(soup)
+
+        # Quellseite speichern (die aufgelöste URL)
         if is_valid_onion_url(resolved_url):
             cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (resolved_url, category))
-            conn.commit()
-            print(f"Seite gespeichert: {resolved_url}")
+            source_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (resolved_url,)).fetchone()[0]
         else:
-            print(f"Ungültige URL ausgeschlossen: {resolved_url}")
+            log_event("WARNING", f"Ungültige Quelle ignoriert: {resolved_url}")
             return
 
+        # Links auf der Seite finden und verarbeiten
         for link in soup.find_all('a', href=True):
-            print(f"Gefundener Link: {link['href']}")
             target_url = link['href'].strip()
+            anchor_text = link.get_text(strip=True)
 
+            # Relative URLs in absolute URLs umwandeln
             if target_url.startswith('/'):
                 target_url = urljoin(resolved_url, target_url)
 
-            if not is_valid_onion_url(target_url):
-                print(f"Ungültiger Link ausgeschlossen: {target_url}")
+            # Redirect-Links auflösen und das tatsächliche Ziel speichern
+            final_target_url = resolve_redirect(target_url)
+
+            # Nur gültige .onion-Links verarbeiten
+            if not is_valid_onion_url(final_target_url):
                 continue
 
-            try:
-                cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (target_url, category))
-                conn.commit()
-                print(f"Zielseite gespeichert: {target_url}")
-            except sqlite3.Error as e:
-                print(f"Fehler beim Speichern der Zielseite {target_url}: {e}")
+            # Zielseite speichern
+            target_category = categorize_url_from_html(soup)
+            cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (final_target_url, target_category))
+            target_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (final_target_url,)).fetchone()[0]
 
+            # Backlink speichern (Source -> Ziel mit Ankertext)
+            cursor.execute('''
+                INSERT INTO backlinks (source_id, target_id, anchor_text, timestamp)
+                VALUES (?, ?, ?, datetime('now'))
+            ''', (source_id, target_id, anchor_text))
+
+            print(f"Backlink gespeichert: {resolved_url} -> {final_target_url}")
+            log_event("INFO", f"Backlink gespeichert: {resolved_url} -> {final_target_url}")
+
+        conn.commit()
+        show_progress(total_urls, len(processed_urls))
     except Exception as e:
-        print(f"Fehler bei {source_url}: {e}")
         log_event("ERROR", f"Fehler bei {source_url}: {e}", source_url)
 
 
