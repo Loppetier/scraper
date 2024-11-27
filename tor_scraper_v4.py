@@ -122,30 +122,40 @@ def categorize_url_from_html(soup, default_category="Unknown"):
 
 # Scraping mit Redirect-Auflösung und Filterung
 def scrape_backlinks(source_url):
+    print(f"Starte Verarbeitung für URL: {source_url}")
+
     if source_url in processed_urls:
+        print(f"Bereits verarbeitet: {source_url}")
         return
     processed_urls.add(source_url)
 
     try:
         resolved_url = resolve_redirect(source_url)
+        print(f"Nach Redirect: {resolved_url}")
+
         if is_redirect_url(resolved_url):
-            log_event("WARNING", f"Redirect-URL ignoriert: {resolved_url}")
+            print(f"Redirect-URL ignoriert: {resolved_url}")
             return
 
         response = requests.get(resolved_url, proxies=tor_proxy, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        log_event("INFO", f"Erfolgreich auf {resolved_url} zugegriffen.", resolved_url)
+        print(f"Seite abgerufen: {resolved_url} (Status: {response.status_code})")
 
         # Dynamische Kategorisierung
         category = categorize_url_from_html(soup)
+        print(f"Kategorie: {category}")
 
         # Quellseite speichern
         if is_valid_onion_url(resolved_url):
-            cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (resolved_url, category))
-            source_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (resolved_url,)).fetchone()[0]
+            try:
+                cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (resolved_url, category))
+                conn.commit()
+                print(f"Seite gespeichert: {resolved_url}")
+            except sqlite3.Error as e:
+                print(f"Fehler beim Speichern von {resolved_url}: {e}")
         else:
-            log_event("WARNING", f"Ungültige Quelle ignoriert: {resolved_url}")
+            print(f"Ungültige Quelle ignoriert: {resolved_url}")
             return
 
         for link in soup.find_all('a', href=True):
@@ -159,19 +169,22 @@ def scrape_backlinks(source_url):
                 continue
 
             target_category = categorize_url_from_html(soup)
-            cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (target_url, target_category))
-            target_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (target_url,)).fetchone()[0]
+            try:
+                cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (target_url, target_category))
+                conn.commit()
+                target_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (target_url,)).fetchone()[0]
+                cursor.execute('''
+                    INSERT INTO backlinks (source_id, target_id, anchor_text, timestamp)
+                    VALUES (?, ?, ?, datetime('now'))
+                ''', (source_id, target_id, anchor_text))
+                conn.commit()
+                print(f"Backlink gespeichert: {resolved_url} -> {target_url}")
+            except sqlite3.Error as e:
+                print(f"Fehler beim Speichern von Backlink {resolved_url} -> {target_url}: {e}")
 
-            cursor.execute('''
-                INSERT INTO backlinks (source_id, target_id, anchor_text, timestamp)
-                VALUES (?, ?, ?, datetime('now'))
-            ''', (source_id, target_id, anchor_text))
-
-            log_event("INFO", f"Backlink gespeichert: {resolved_url} -> {target_url}", resolved_url)
-
-        conn.commit()
         show_progress(total_urls, len(processed_urls))
     except Exception as e:
+        print(f"Fehler bei {source_url}: {e}")
         log_event("ERROR", f"Fehler bei {source_url}: {e}", source_url)
 
 # Rückwärts-Suche mit Onion-Suchmaschinen
