@@ -134,58 +134,47 @@ def scrape_backlinks(source_url):
         print(f"Nach Redirect: {resolved_url}")
 
         if is_redirect_url(resolved_url):
-            print(f"Redirect-URL ignoriert: {resolved_url}")
+            print(f"Als Redirect erkannt und ignoriert: {resolved_url}")
             return
 
         response = requests.get(resolved_url, proxies=tor_proxy, timeout=15)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
         print(f"Seite abgerufen: {resolved_url} (Status: {response.status_code})")
 
-        # Dynamische Kategorisierung
+        soup = BeautifulSoup(response.content, 'html.parser')
         category = categorize_url_from_html(soup)
         print(f"Kategorie: {category}")
 
-        # Quellseite speichern
         if is_valid_onion_url(resolved_url):
-            try:
-                cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (resolved_url, category))
-                conn.commit()
-                print(f"Seite gespeichert: {resolved_url}")
-            except sqlite3.Error as e:
-                print(f"Fehler beim Speichern von {resolved_url}: {e}")
+            cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (resolved_url, category))
+            conn.commit()
+            print(f"Seite gespeichert: {resolved_url}")
         else:
-            print(f"Ungültige Quelle ignoriert: {resolved_url}")
+            print(f"Ungültige URL ausgeschlossen: {resolved_url}")
             return
 
         for link in soup.find_all('a', href=True):
+            print(f"Gefundener Link: {link['href']}")
             target_url = link['href'].strip()
-            anchor_text = link.get_text(strip=True)
 
             if target_url.startswith('/'):
                 target_url = urljoin(resolved_url, target_url)
 
             if not is_valid_onion_url(target_url):
+                print(f"Ungültiger Link ausgeschlossen: {target_url}")
                 continue
 
-            target_category = categorize_url_from_html(soup)
             try:
-                cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (target_url, target_category))
+                cursor.execute("INSERT OR IGNORE INTO pages (url, category) VALUES (?, ?)", (target_url, category))
                 conn.commit()
-                target_id = cursor.execute("SELECT id FROM pages WHERE url = ?", (target_url,)).fetchone()[0]
-                cursor.execute('''
-                    INSERT INTO backlinks (source_id, target_id, anchor_text, timestamp)
-                    VALUES (?, ?, ?, datetime('now'))
-                ''', (source_id, target_id, anchor_text))
-                conn.commit()
-                print(f"Backlink gespeichert: {resolved_url} -> {target_url}")
+                print(f"Zielseite gespeichert: {target_url}")
             except sqlite3.Error as e:
-                print(f"Fehler beim Speichern von Backlink {resolved_url} -> {target_url}: {e}")
+                print(f"Fehler beim Speichern der Zielseite {target_url}: {e}")
 
-        show_progress(total_urls, len(processed_urls))
     except Exception as e:
         print(f"Fehler bei {source_url}: {e}")
         log_event("ERROR", f"Fehler bei {source_url}: {e}", source_url)
+
 
 # Rückwärts-Suche mit Onion-Suchmaschinen
 def find_referring_pages(target_url):
