@@ -1,12 +1,18 @@
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
-from stem.control import Controller
 from stem import Signal
-import time
-import datetime
+from stem.control import Controller
 import sqlite3
-from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urljoin, urlparse
+import time
+import logging
+
+# Logging konfigurieren
+logging.basicConfig(
+    filename='backlink_scraper.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # Tor-Proxyeinstellungen
 tor_proxy = {
@@ -15,7 +21,7 @@ tor_proxy = {
 }
 
 # Verbindung zur SQLite-Datenbank
-conn = sqlite3.connect('organic_backlinks.db')
+conn = sqlite3.connect('backlinks.db')
 cursor = conn.cursor()
 
 # Tabellen erstellen
@@ -38,32 +44,8 @@ CREATE TABLE IF NOT EXISTS backlinks (
     FOREIGN KEY (target_id) REFERENCES pages (id)
 )
 ''')
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    url TEXT,
-    level TEXT,
-    message TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-''')
 
 conn.commit()
-# Fortschrittsanzeige
-processed_urls = set()
-start_time = time.time()
-
-def show_progress(current, total):
-    elapsed_time = time.time() - start_time
-    avg_time_per_url = elapsed_time / current if current > 0 else 0
-    remaining_time = avg_time_per_url * (total - current)
-
-    elapsed_str = str(datetime.timedelta(seconds=int(elapsed_time)))
-    remaining_str = str(datetime.timedelta(seconds=int(remaining_time)))
-
-    progress = (current / total) * 100 if total > 0 else 0
-    print(f"Fortschritt: {current}/{total} URLs ({progress:.2f}%)")
-    print(f"Vergangene Zeit: {elapsed_str}, Verbleibende Zeit: {remaining_str}")
 
 # Tor-IP erneuern
 def renew_tor_ip():
@@ -71,19 +53,10 @@ def renew_tor_ip():
         with Controller.from_port(port=9051) as controller:
             controller.authenticate(password='your_tor_password')
             controller.signal(Signal.NEWNYM)
-            time.sleep(10)
-            log_event("INFO", "Tor-IP erfolgreich erneuert.")
+            time.sleep(10)  # Warte, bis die neue IP aktiv ist
+            logging.info("Tor-IP erfolgreich erneuert.")
     except Exception as e:
-        log_event("ERROR", f"Fehler beim Erneuern der Tor-IP: {e}")
-
-# Log-Ereignis speichern
-def log_event(level, message, url=None):
-    cursor.execute('''
-        INSERT INTO logs (url, level, message)
-        VALUES (?, ?, ?)
-    ''', (url, level, message))
-    conn.commit()
-
+        logging.error(f"Fehler beim Erneuern der Tor-IP: {e}")
 
 # Funktionen
 
@@ -92,9 +65,10 @@ def fetch_html(url):
     try:
         response = requests.get(url, proxies=tor_proxy, timeout=15)
         response.raise_for_status()
+        logging.info(f"Erfolgreich HTML von {url} abgerufen.")
         return response.content
     except Exception as e:
-        print(f"Fehler beim Abrufen von {url}: {e}")
+        logging.error(f"Fehler beim Abrufen von {url}: {e}")
         return None
 
 def extract_onion_links(html, base_url):
@@ -135,20 +109,22 @@ def save_to_database(source_url, backlinks):
             ''', (source_id, target_id, anchor_text))
 
         conn.commit()
+        logging.info(f"Backlinks von {source_url} erfolgreich in der Datenbank gespeichert.")
     except Exception as e:
-        print(f"Fehler beim Speichern in die Datenbank: {e}")
+        logging.error(f"Fehler beim Speichern von Backlinks für {source_url}: {e}")
 
-def scrape_organic_backlinks(start_url):
-    """Scraped organische Backlinks von einer Seite."""
-    html = fetch_html(start_url)
-    if html:
-        backlinks = extract_onion_links(html, start_url)
-        save_to_database(start_url, backlinks)
-
-# Hauptfunktion zum Scrapen mehrerer Seiten
-def scrape_multiple_sites(urls):
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        executor.map(scrape_organic_backlinks, urls)
+# Scraping-Prozess
+def scrape_backlinks(start_urls):
+    for i, url in enumerate(start_urls):
+        logging.info(f"Beginne mit dem Scraping von {url} ({i + 1}/{len(start_urls)})")
+        
+        html = fetch_html(url)
+        if html:
+            backlinks = extract_onion_links(html, url)
+            save_to_database(url, backlinks)
+        
+        if (i + 1) % 5 == 0:  # Tor-IP alle 5 Anfragen erneuern
+            renew_tor_ip()
 
 # Liste von `.onion`-Startseiten
 urls_to_scrape = [
