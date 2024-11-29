@@ -87,7 +87,11 @@ def extract_onion_links(html, base_url):
         # Nur .onion-Links speichern
         if '.onion' in href and len(urlparse(href).netloc) == 56:
             links.add((href, anchor_text))
+        else:
+            logging.debug(f"Ungültiger oder externer Link ignoriert: {href}")
 
+    if not links:
+        logging.warning(f"Keine .onion-Links auf der Seite {base_url} gefunden.")
     return links
 
 def save_to_database(source_url, backlinks):
@@ -121,13 +125,16 @@ def scrape_backlinks(start_urls):
         html = fetch_html(url)
         if html:
             backlinks = extract_onion_links(html, url)
-            save_to_database(url, backlinks)
+            if backlinks:
+                save_to_database(url, backlinks)
+            else:
+                logging.warning(f"Keine Backlinks für {url} gefunden.")
         
         if (i + 1) % 5 == 0:  # Tor-IP alle 5 Anfragen erneuern
             renew_tor_ip()
 
 # Liste von `.onion`-Startseiten
-urls_to_scrape = [
+urls_to_process = [
 'http://2356uhnbpv5nk3bni5bv6jg2cd6lgj664kwx3lhyelstpttpyv4kk2qd.onion',
 'http://2bcbla34hrkp6shb4myzb2wntl2fxdbrroc2t4t7c3shckvhvk4fw6qd.onion',
 'http://2ezyofc26j73hv3xxvsrnbc23dqxhgxqtk5ogcc7y6j5t6rlqquvhzid.onion',
