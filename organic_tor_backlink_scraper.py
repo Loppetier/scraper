@@ -308,8 +308,8 @@ urls_to_scrape = [
 'https://facebookwkhpilnemxj7asaniu7vnjjbiltxjqhye3mhbshg7kx5tfyd.onion'
 ]
 
-# Scraping starten
-scrape_multiple_sites(urls_to_scrape)
+# Scraping-Prozess starten
+scrape_backlinks(urls_to_process)
 
-# Verbindung zur Datenbank schließen
+# Verbindung schließen
 conn.close()
